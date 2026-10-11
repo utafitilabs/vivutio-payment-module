@@ -86,7 +86,6 @@ final readonly class PaymentController
         $owedCount = \count(array_filter($all, static fn (array $row): bool => $matches($row, 'owed')));
         $overdueCount = \count(array_filter($all, static fn (array $row): bool => $matches($row, 'overdue')));
         $month = $this->service->paidThisMonth();
-        $fallback = ([] === $all ? 'USD' : $all[0]['charge']->currency).' 0.00';
         $shown = array_values(array_filter($all, static fn (array $row): bool => null === $state || $matches($row, $state)));
         usort($shown, static fn (array $a, array $b): int => [PaymentService::PAID === $a['state'], $a['charge']->dueOn] <=> [PaymentService::PAID === $b['state'], $b['charge']->dueOn]);
 
@@ -97,9 +96,9 @@ final readonly class PaymentController
             'states' => self::STATES,
             'state' => $state,
             'band' => [
-                ['Owed to you', PaymentService::amounts($owed, $fallback), self::count($owedCount, 'charge')],
-                ['Overdue', PaymentService::amounts($overdue, $fallback), self::count($overdueCount, 'charge')],
-                ['Paid this month', PaymentService::amounts($month['amounts'], $fallback), 0 === $month['count'] ? 'no payments' : self::count($month['count'], 'payment')],
+                ['Owed to you', PaymentService::amounts($owed, 'None'), self::count($owedCount, 'charge')],
+                ['Overdue', PaymentService::amounts($overdue, 'None'), self::count($overdueCount, 'charge')],
+                ['Paid this month', PaymentService::amounts($month['amounts'], 'None'), self::count($month['count'], 'payment')],
             ],
         ]));
     }
@@ -156,9 +155,10 @@ final readonly class PaymentController
         return new RedirectResponse($this->urls->generate(self::SHOW, ['key' => $key]));
     }
 
+    /** "1 charge", "2 charges", "no charges". */
     private static function count(int $n, string $word): string
     {
-        return $n.' '.$word.(1 === $n ? '' : 's');
+        return (0 === $n ? 'no' : (string) $n).' '.$word.(1 === $n ? '' : 's');
     }
 
     private static function nameOf(UserInterface $user): string

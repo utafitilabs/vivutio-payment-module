@@ -58,12 +58,22 @@ final class ThePaymentsTest extends WebTestCase
 
         self::assertSame('/payments', $this->browser->request('GET', '/')->filter('nav.menu')->selectLink('Payments')->attr('href'));
         $page = $this->browser->request('GET', '/payments');
-        self::assertSame(['USD 11,520.78 2 charges', 'USD 3,912.20 1 charge', 'USD 0.00 no payments'], $this->band($page));
+        self::assertSame(['USD 11,520.78 2 charges', 'USD 3,912.20 1 charge', 'None no payments'], $this->band($page));
         self::assertSame(['All 2', 'Owed 2', 'Overdue 1', 'Paid 0'], $this->chips($page));
         self::assertSame([
             ['NCS-0004 Northern Circuit Safari, 18 – 23 Oct 2026', 'Kweka party Tour booking', 'Sat 10 Oct 2026', 'USD 3,912.20', 'USD 0.00', 'USD 3,912.20', 'Overdue'],
             ['NCS-0002 Northern Circuit Safari, 2 – 7 Aug 2027', 'Savanna Trails Travel Tour booking', 'Thu 5 Nov 2026', 'USD 7,608.58', 'USD 0.00', 'USD 7,608.58', 'Unpaid'],
         ], $this->rows($page));
+    }
+
+    /** Nothing owed, late or paid reads as none, in no currency of its own. */
+    public function testNothingReadsAsNone(): void
+    {
+        $this->signedInAs($this->person('Baraka', TierEnum::Admin));
+        $page = $this->browser->request('GET', '/payments/stand_in:ncs-4');
+        $this->browser->submit($page->selectButton('Record the payment')->form(['amount' => '3912.20', 'received' => '2026-10-11', 'method' => 'cash', 'reference' => '', 'note' => '']));
+
+        self::assertSame(['USD 7,608.58 1 charge', 'None no charges', 'USD 3,912.20 1 payment'], $this->band($this->browser->request('GET', '/payments')));
     }
 
     public function testAPaymentIsRecordedAgainstACharge(): void
