@@ -1,0 +1,11 @@
+{# A field's refusal, said beside it, or its hint. #}
+{% macro hint(field, wrong, hint) %}{% if wrong[field] is defined %}<div class="hint"><span>{{ wrong[field] }}</span></div>{% elseif hint %}<div class="hint"><span>{{ hint }}</span></div>{% endif %}{% endmacro %}
+
+{# Where a charge stands, as a chip. #}
+{% macro chip(state) -%}
+{%- set label = {paid: 'Paid', part: 'Part paid', unpaid: 'Unpaid', overdue: 'Overdue'}[state] -%}
+<span class="chip{{ state == 'paid' ? ' ok' : (state == 'overdue' ? ' danger' : '') }}">{{ label }}</span>
+{%- endmacro %}
+
+{# An amount in cents of a currency: "USD 4,608.58". #}
+{% macro money(currency, cents) %}{{ currency }} {{ (cents / 100)|number_format(2) }}{% endmacro %}

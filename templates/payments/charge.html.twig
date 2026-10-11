@@ -1,0 +1,86 @@
+{# A charge: what it comes to, what has been paid, what is owed, the payments
+   as they came, recording one and striking one out. #}
+{% extends '@Shell/page.html.twig' %}
+{% import '@Shell/_icons.html.twig' as icons %}
+{% import '@VivutioPayment/payments/_macros.html.twig' as payment_ %}
+
+{% block title %}{{ row.charge.reference }} · Payments{% endblock %}
+{% block here %}payments{% endblock %}
+
+{% block page %}
+{%- set charge = row.charge -%}
+{%- set live = payments|filter(p => not p.struck) -%}
+<header class="page-head">
+    <div><nav class="trail" aria-label="Where you are"><a href="{{ path('payment_charges') }}">Payments</a> / {{ charge.reference }}</nav><div class="title"><h1>{{ charge.reference }}</h1><span class="about">{{ payment_.chip(row.state) }}</span></div>
+    <p class="hint">{{ charge.kind }}: {% if charge.route %}<a href="{{ path(charge.route, charge.routeParameters) }}">{{ charge.about }}</a>{% else %}{{ charge.about }}{% endif %}</p></div>
+    <div class="actions"><a class="button outline" href="{{ path('payment_charges') }}">Back to payments</a></div>
+</header>
+
+{% if expired %}<div class="notice danger" role="alert">{{ icons.icon('alert') }}<span>The form had expired, so nothing was recorded. Try again.</span></div>{% endif %}
+
+<div class="band">
+    <span class="f"><span class="k">Charged</span><span class="v">{{ payment_.money(charge.currency, charge.amount) }}</span></span>
+    <span class="f"><span class="k">Paid</span><span class="v">{{ payment_.money(charge.currency, row.paid) }}</span></span>
+    <span class="f"><span class="k">Owed</span><span class="v">{{ payment_.money(charge.currency, row.owed) }}{% if row.owed > 0 %}<em>due {{ charge.dueOn|date('D j M Y') }}</em>{% endif %}</span></span>
+</div>
+
+<div class="columns">
+    <div class="stack">
+        <section class="panel list">
+            <header class="panel-head"><h2>Payments</h2><p>As they came, the latest first</p></header>
+            <table class="table">
+                <thead><tr><th>Received</th><th>How</th><th>Their reference</th><th>Amount</th><th>Recorded by</th></tr></thead>
+                <tbody>
+                {% for payment in payments %}
+                    <tr data-payment>
+                        <td>{{ payment.receivedOn|date('D j M Y') }}</td>
+                        <td>{{ payment.method.label }}</td>
+                        <td>{{ payment.reference ?: '—' }}</td>
+                        <td>{% if payment.struck %}<s>{{ payment_.money(payment.currency, payment.amount) }}</s>{% else %}{{ payment_.money(payment.currency, payment.amount) }}{% endif %}</td>
+                        <td>{{ payment.recordedBy }}{% if payment.struck %}<small class="struck">Struck out by {{ payment.struckBy }}: {{ payment.struckReason }}</small>{% endif %}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="5"><div class="empty"><b>No payments yet</b><span>A payment is recorded here as it came.</span></div></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </div>
+    <aside class="aside stack">
+        <section class="panel small">
+            <header class="panel-head"><h2>Owed by</h2></header>
+            {% if partner %}
+                <div class="fact"><span>Partner</span><b>{% if door('partners.read') %}<a href="{{ path('partner_partner', {uuid: partner.partnerId}) }}">{{ partner.name }}</a>{% else %}{{ partner.name }}{% endif %}</b></div>
+                <div class="fact"><span>Pays</span><b>{{ partner.creditDays > 0 ? 'in ' ~ partner.creditDays ~ ' days' : 'at once' }}</b></div>
+            {% else %}
+                <div class="fact"><span>Paying directly</span><b>{{ row.who }}</b></div>
+            {% endif %}
+            <div class="fact"><span>Raised</span><b>{{ charge.raisedOn|date('D j M Y') }}</b></div>
+        </section>
+        {% if door('payments.record') and row.owed > 0 %}
+        <form class="panel small" method="post" action="{{ path('payment_record', {key: charge.key}) }}" novalidate>
+            <header class="panel-head"><h2>Record a payment</h2><p>As it came</p></header>
+            <input type="hidden" name="_token" value="{{ csrf_token('payment_record') }}">
+            <div class="grid-2">
+                <div class="field{{ wrong.amount is defined ? ' wrong' }}"><label for="payment-amount">Amount</label><input class="input" id="payment-amount" name="amount" value="{{ typed.amount }}" inputmode="decimal">{{ payment_.hint('amount', wrong, charge.currency) }}</div>
+                <div class="field{{ wrong.received is defined ? ' wrong' }}"><label for="payment-received">Received</label><input class="input" id="payment-received" name="received" type="date" value="{{ typed.received }}">{{ payment_.hint('received', wrong, null) }}</div>
+            </div>
+            <div class="field{{ wrong.method is defined ? ' wrong' }}"><label for="payment-method">How</label><select class="select" id="payment-method" name="method">{% for method in methods %}<option value="{{ method.value }}"{{ method.value == typed.method ? ' selected' }}>{{ method.label }}</option>{% endfor %}</select>{{ payment_.hint('method', wrong, null) }}</div>
+            <div class="field{{ wrong.reference is defined ? ' wrong' }}"><label for="payment-reference">Their reference</label><input class="input" id="payment-reference" name="reference" value="{{ typed.reference }}" maxlength="60">{{ payment_.hint('reference', wrong, 'The bank’s or the mobile money transaction’s') }}</div>
+            <div class="field{{ wrong.note is defined ? ' wrong' }}"><label for="payment-note">Note</label><input class="input" id="payment-note" name="note" value="{{ typed.note }}" maxlength="200">{{ payment_.hint('note', wrong, null) }}</div>
+            <button type="submit" class="button main">Record the payment</button>
+        </form>
+        {% endif %}
+        {% if door('payments.manage') and live|length > 0 %}
+        <form class="panel small" method="post" action="{{ path('payment_strike', {key: charge.key}) }}" novalidate>
+            <header class="panel-head"><h2>A payment wrongly recorded</h2></header>
+            <input type="hidden" name="_token" value="{{ csrf_token('payment_strike') }}">
+            <p class="hint">Struck out and kept, with why: the amount owed is worked out again.</p>
+            <div class="field{{ wrong.which is defined ? ' wrong' }}"><label for="strike-which">Which</label><select class="select" id="strike-which" name="which">{% for payment in live %}<option value="{{ payment.uuid }}">{{ payment.receivedOn|date('D j M Y') }} · {{ payment_.money(payment.currency, payment.amount) }}</option>{% endfor %}</select>{{ payment_.hint('which', wrong, null) }}</div>
+            <div class="field{{ wrong.reason is defined ? ' wrong' }}"><label for="strike-reason">Why</label><input class="input" id="strike-reason" name="reason" maxlength="200">{{ payment_.hint('reason', wrong, null) }}</div>
+            <button type="submit" class="button danger">Strike it out</button>
+        </form>
+        {% endif %}
+    </aside>
+</div>
+{% endblock %}

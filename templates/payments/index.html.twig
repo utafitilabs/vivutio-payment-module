@@ -1,0 +1,51 @@
+{# What the organization is owed, from every module that charges, and what has been paid against it. #}
+{% extends '@Shell/page.html.twig' %}
+{% import '@VivutioPayment/payments/_macros.html.twig' as payment_ %}
+
+{% block title %}Payments{% endblock %}
+{% block here %}payments{% endblock %}
+
+{% block page %}
+<header class="page-head">
+    <div><nav class="trail" aria-label="Where you are">Payments</nav><div class="title"><h1>Payments</h1><span class="about">What is owed to you, and what you have been paid</span></div></div>
+</header>
+
+<div class="band">
+    {% for figure in band %}<span class="f"><span class="k">{{ figure[0] }}</span><span class="v">{{ figure[1] }}<em>{{ figure[2] }}</em></span></span>{% endfor %}
+</div>
+
+<div class="stack">
+    <form class="tools" method="get" action="{{ path('payment_charges') }}" data-tools>
+        <span data-facet="state">
+            <a class="chip" data-chip href="{{ path('payment_charges') }}"{{ state is null ? ' aria-current="true"' }}>All <em>{{ total }}</em></a>
+            {% for value, label in states %}
+                <a class="chip" data-chip href="{{ path('payment_charges', {state: value}) }}"{{ value == state ? ' aria-current="true"' }}>{{ label }} <em>{{ counts[value] }}</em></a>
+            {% endfor %}
+        </span>
+        <span class="shown">showing <b>{{ rows|length }}</b> of {{ total }}</span>
+    </form>
+
+    <section class="panel list">
+        <table class="table">
+            <thead><tr><th>For</th><th>Who owes</th><th>Due</th><th>Charged</th><th>Paid</th><th>Owed</th><th style="width:110px">Status</th><th style="width:90px"></th></tr></thead>
+            <tbody>
+            {% for row in rows %}
+                {%- set charge = row.charge -%}
+                <tr data-charge="{{ charge.key }}">
+                    <td><div><b style="white-space:nowrap">{{ charge.reference }}</b><small>{{ charge.about }}</small></div></td>
+                    <td><div>{{ row.who }}<small>{{ charge.kind }}</small></div></td>
+                    <td>{{ charge.dueOn|date('D j M Y') }}</td>
+                    <td>{{ payment_.money(charge.currency, charge.amount) }}</td>
+                    <td>{{ payment_.money(charge.currency, row.paid) }}</td>
+                    <td><b>{{ payment_.money(charge.currency, row.owed) }}</b></td>
+                    <td>{{ payment_.chip(row.state) }}</td>
+                    <td><a class="button outline" href="{{ path('payment_charge', {key: charge.key}) }}">Open</a></td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8"><div class="empty"><b>Nothing here</b><span>What a booking or a ticket comes to is listed here by the module that keeps it.</span></div></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+{% endblock %}

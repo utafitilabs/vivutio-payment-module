@@ -1,0 +1,6 @@
+# The payment module's pages (vivutio/payment-module): what is owed and paid,
+# under /payments. This file is what mounts them, and it is yours: remove the
+# import and the pages are gone.
+payment:
+    resource: '@VivutioPaymentBundle/src/Controller/'
+    type: attribute
