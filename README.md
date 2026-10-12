@@ -37,7 +37,16 @@ it comes to, what has been paid, what is owed, and where it stands (unpaid,
 part paid, paid, overdue). A charge's page lists its payments and records one
 as it came: the amount (never more than is owed), the day received, how (bank
 transfer, mobile money, cash, card, cheque) and the payer's reference. A
-payment recorded wrongly is struck out with why, never deleted.
+payment recorded wrongly is struck out with why, never deleted. A charge of
+nothing (a ticket voided, a hold let go at no charge) is not listed unless
+something was paid against it, which is money held; its page still opens.
+
+On the organization's dashboard, through the core's `DashboardSourceInterface`,
+the module puts **Owed to you** in the band (what is owed, by currency, and how
+much of it is overdue, or how many charges when several currencies are owed)
+and an **Overdue** card: the overdue charges, the longest late first, five at
+most, each with what is owed and how many days late, and a door to the
+register's overdue. Both are for whoever holds `payments.read`.
 
 The payments are said back to the core through `PaymentSourceInterface`, for
 whoever keeps the books. Taking payments through a provider (DPO Pay, Pesapal,
@@ -47,7 +56,7 @@ Selcom, Stripe) comes later.
 
 | Pair | Who |
 |---|---|
-| `payments.read` | The register and a charge's page |
+| `payments.read` | The register, a charge's page, and payments on the dashboard |
 | `payments.record` | Recording a payment |
 | `payments.manage` | Striking a payment out |
 

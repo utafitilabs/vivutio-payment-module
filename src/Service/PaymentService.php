@@ -48,7 +48,10 @@ final readonly class PaymentService
     }
 
     /**
-     * Every charge with what is paid and owed on it, the soonest due first.
+     * Every charge with what is paid and owed on it, the soonest due first. A
+     * charge of nothing with nothing paid against it (a ticket voided, a hold
+     * let go at no charge) is left out; with something paid, that is money
+     * held, and it stays.
      *
      * @return list<array{charge: Charge, paid: int, owed: int, state: string, who: string}>
      */
@@ -60,8 +63,28 @@ final readonly class PaymentService
                 $paid[$payment->getChargeKey()] = ($paid[$payment->getChargeKey()] ?? 0) + $payment->getAmount();
             }
         }
+        $charged = array_filter($this->charges->all(), static fn (Charge $charge): bool => $charge->amount > 0 || ($paid[$charge->key] ?? 0) > 0);
 
-        return array_map(fn (Charge $charge): array => $this->row($charge, $paid[$charge->key] ?? 0), $this->charges->all());
+        return array_values(array_map(fn (Charge $charge): array => $this->row($charge, $paid[$charge->key] ?? 0), $charged));
+    }
+
+    /**
+     * What is owed on the rows, by currency.
+     *
+     * @param list<array{charge: Charge, paid: int, owed: int, state: string, who: string}> $rows
+     *
+     * @return array<string, int>
+     */
+    public static function owed(array $rows): array
+    {
+        $owed = [];
+        foreach ($rows as $row) {
+            if ($row['owed'] > 0) {
+                $owed[$row['charge']->currency] = ($owed[$row['charge']->currency] ?? 0) + $row['owed'];
+            }
+        }
+
+        return $owed;
     }
 
     /**

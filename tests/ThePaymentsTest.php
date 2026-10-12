@@ -28,8 +28,12 @@ use Vivutio\Bundle\IdentityBundle\Entity\User;
 use Vivutio\Bundle\IdentityBundle\Enum\TierEnum;
 use Vivutio\Bundle\PartnerBundle\Entity\Partner;
 use Vivutio\Bundle\PartnerBundle\Enum\PartnerKindEnum;
+use Vivutio\Contracts\Partner\Charge;
 use Vivutio\Contracts\Partner\Payment;
 use Vivutio\Contracts\Partner\PaymentsInterface;
+use Vivutio\Payment\Entity\RecordedPayment;
+use Vivutio\Payment\Enum\MethodEnum;
+use Vivutio\Payment\Tests\Application\StandIn\StandInCharges;
 
 /**
  * Payments by hand, as ruled (11 October 2026) and drawn (vivutio-designs
@@ -50,6 +54,12 @@ final class ThePaymentsTest extends WebTestCase
         $this->migrate();
         $this->em()->persist((new Partner('Savanna Trails Travel', PartnerKindEnum::TourOperator, 'KE', 'desk@savanna-trails.example'))->setCreditDays(30));
         $this->em()->flush();
+    }
+
+    protected function tearDown(): void
+    {
+        StandInCharges::$besides = [];
+        parent::tearDown();
     }
 
     public function testWhatIsOwedIsListedFromEveryModuleThatCharges(): void
@@ -74,6 +84,112 @@ final class ThePaymentsTest extends WebTestCase
         $this->browser->submit($page->selectButton('Record the payment')->form(['amount' => '3912.20', 'received' => '2026-10-11', 'method' => 'cash', 'reference' => '', 'note' => '']));
 
         self::assertSame(['USD 7,608.58 1 charge', 'None no charges', 'USD 3,912.20 1 payment'], $this->band($this->browser->request('GET', '/payments')));
+    }
+
+    /**
+     * A ticket voided or a hold let go at no charge leaves a charge of nothing:
+     * nothing is owed on it and nothing was paid, so it is not in the register.
+     * Something paid against it is money held, and the charge stays.
+     */
+    public function testAChargeOfNothingIsNotListedUnlessSomethingWasPaidAgainstIt(): void
+    {
+        StandInCharges::$besides = [new Charge('stand_in:ncs-5', 'NCS-0005', 'Tour booking', 'Northern Circuit Safari, voided', null, 'Lema party', 'USD', 0, new \DateTimeImmutable('2026-09-20'), new \DateTimeImmutable('2026-10-01'))];
+        $this->signedInAs($this->person('Baraka', TierEnum::Admin));
+
+        $page = $this->browser->request('GET', '/payments');
+        self::assertSame(['All 2', 'Owed 2', 'Overdue 1', 'Paid 0'], $this->chips($page));
+        self::assertSame(['NCS-0004', 'NCS-0002'], $page->filter('tr[data-charge] td:first-child b')->each(fn (Crawler $b): string => $this->text($b)));
+        self::assertCount(0, $this->browser->request('GET', '/payments?state=paid')->filter('tr[data-charge]'));
+        $this->browser->request('GET', '/payments/stand_in:ncs-5');
+        self::assertResponseIsSuccessful();
+
+        $this->em()->persist(new RecordedPayment('stand_in:ncs-5', 'NCS-0005', 'USD', 50000, new \DateTimeImmutable('2026-09-25'), MethodEnum::BankTransfer, 'Baraka Kimaro', new \DateTimeImmutable('2026-09-25')));
+        $this->em()->flush();
+        $page = $this->browser->request('GET', '/payments');
+        self::assertSame(['All 3', 'Owed 2', 'Overdue 1', 'Paid 1'], $this->chips($page));
+        self::assertSame(['NCS-0005 Northern Circuit Safari, voided', 'Lema party Tour booking', 'Thu 1 Oct 2026', 'USD 0.00', 'USD 500.00', 'USD 0.00', 'Paid'], $this->rows($page)[2]);
+    }
+
+    /** What is owed and how much of it is late stand in the dashboard's band. */
+    public function testWhatIsOwedStandsInTheDashboardsBand(): void
+    {
+        $this->signedInAs($this->person('Baraka', TierEnum::Admin));
+
+        self::assertSame(['Owed to you USD 11,520.78 USD 3,912.20 overdue'], $this->figures($this->browser->request('GET', '/')));
+    }
+
+    /** Owed in several currencies, the late part is counted in charges. */
+    public function testOwedInSeveralCurrenciesTheLateAreCounted(): void
+    {
+        StandInCharges::$besides = [new Charge('stand_in:tk-27', 'TK-0027', 'Ticket', 'DAR–ZNZ', null, 'Bahari party', 'TZS', 124000000, new \DateTimeImmutable('2026-09-20'), new \DateTimeImmutable('2026-09-30'))];
+        $this->signedInAs($this->person('Baraka', TierEnum::Admin));
+
+        self::assertSame(['Owed to you TZS 1,240,000.00 · USD 11,520.78 2 overdue'], $this->figures($this->browser->request('GET', '/')));
+    }
+
+    /** The overdue card: the longest late first, five at most, each with what is owed and how late, and a door to the overdue. */
+    public function testTheOverdueCardShowsTheLongestLateFirst(): void
+    {
+        $this->signedInAs($this->person('Baraka', TierEnum::Admin));
+        $card = $this->card($this->browser->request('GET', '/'), 'Overdue');
+
+        self::assertSame('Payments · the longest late first', $this->words($card->filter('.panel-head p')));
+        self::assertSame(['NCS-0004 Kweka party USD 3,912.20 1 day late'], $card->filter('tbody tr')->each(fn (Crawler $row): string => $this->words($row)));
+        self::assertSame('chip danger', $card->filter('.chip')->attr('class'));
+        self::assertSame('1 of 1', $this->words($card->filter('.panel-foot .state')));
+        self::assertSame('All payments', $this->words($card->filter('.panel-foot a.more')));
+        self::assertSame('/payments?state=overdue', $card->filter('.panel-foot a.more')->attr('href'));
+
+        self::mockTime('2026-11-20 09:00:00');
+        $late = static fn (string $n, string $due, int $cents): Charge => new Charge('stand_in:ncs-'.$n, 'NCS-00'.$n, 'Tour booking', 'Northern Circuit Safari', null, 'Party '.$n, 'USD', $cents, new \DateTimeImmutable('2026-09-01'), new \DateTimeImmutable($due));
+        StandInCharges::$besides = [$late('11', '2026-11-19', 10000), $late('12', '2026-09-30', 20000), $late('13', '2026-10-20', 30000), $late('14', '2026-11-01', 40000)];
+        $card = $this->card($this->browser->request('GET', '/'), 'Overdue');
+
+        self::assertSame([
+            'NCS-0012 Party 12 USD 200.00 51 days late',
+            'NCS-0004 Kweka party USD 3,912.20 41 days late',
+            'NCS-0013 Party 13 USD 300.00 31 days late',
+            'NCS-0014 Party 14 USD 400.00 19 days late',
+            'NCS-0002 Savanna Trails Travel USD 7,608.58 15 days late',
+        ], $card->filter('tbody tr')->each(fn (Crawler $row): string => $this->words($row)));
+        self::assertSame('5 of 6', $this->words($card->filter('.panel-foot .state')));
+    }
+
+    /** With nothing late the card says so and the band names no overdue; with nothing owed the band has no figure for it. */
+    public function testNothingLateOrOwedIsSaidSo(): void
+    {
+        $this->signedInAs($this->person('Baraka', TierEnum::Admin));
+        $page = $this->browser->request('GET', '/payments/stand_in:ncs-4');
+        $this->browser->submit($page->selectButton('Record the payment')->form(['amount' => '3912.20', 'received' => '2026-10-11', 'method' => 'cash', 'reference' => '', 'note' => '']));
+
+        $dashboard = $this->browser->request('GET', '/');
+        self::assertSame(['Owed to you USD 7,608.58'], $this->figures($dashboard));
+        $card = $this->card($dashboard, 'Overdue');
+        self::assertCount(0, $card->filter('tbody tr'));
+        self::assertSame('Nothing is overdue', $this->words($card->filter('[data-card-empty]')));
+        self::assertSame('', $this->words($card->filter('.panel-foot .state')));
+
+        $page = $this->browser->request('GET', '/payments/stand_in:ncs-2');
+        $this->browser->submit($page->selectButton('Record the payment')->form(['amount' => '7608.58', 'received' => '2026-10-11', 'method' => 'cash', 'reference' => '', 'note' => '']));
+        self::assertSame([], $this->figures($this->browser->request('GET', '/')));
+    }
+
+    /** The figure and the card are for whoever reads payments. */
+    public function testTheDashboardShowsPaymentsOnlyToWhoeverReadsThem(): void
+    {
+        $accounts = (new Department())->setName('Accounts')->setAllows(['payments.read']);
+        $this->em()->persist($accounts);
+        $this->em()->flush();
+
+        $this->signedInAs($this->person('Daudi', TierEnum::Staff, ['dashboard.read', 'payments.read'], $accounts));
+        $page = $this->browser->request('GET', '/');
+        self::assertSame(['Owed to you USD 11,520.78 USD 3,912.20 overdue'], $this->figures($page));
+        self::assertCount(1, $page->filter('[data-cards] .panel'));
+
+        $this->signedInAs($this->person('Elia', TierEnum::Staff, ['dashboard.read']));
+        $page = $this->browser->request('GET', '/');
+        self::assertSame([], $this->figures($page));
+        self::assertCount(0, $page->filter('[data-cards] .panel'));
     }
 
     public function testAPaymentIsRecordedAgainstACharge(): void
@@ -243,6 +359,39 @@ final class ThePaymentsTest extends WebTestCase
         self::assertCount(1, $panel, $heading);
 
         return $panel->filter('.fact')->each(fn (Crawler $fact): string => $this->text($fact->filter('span')).' | '.$this->text($fact->filter('b')));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function figures(Crawler $page): array
+    {
+        self::assertSame('organization', $page->filter('[data-dashboard]')->attr('data-dashboard'));
+
+        return $page->filter('.band .f')->each(fn (Crawler $figure): string => $this->words($figure));
+    }
+
+    private function card(Crawler $page, string $title): Crawler
+    {
+        $card = $page->filter('[data-cards] .panel')->reduce(fn (Crawler $panel): bool => $title === $this->words($panel->filter('.panel-head h2')));
+        self::assertCount(1, $card, $title);
+
+        return $card;
+    }
+
+    /** The words of a node, each element's own apart, as a reader sees them. */
+    private function words(Crawler $node): string
+    {
+        $words = [];
+        foreach ($node as $element) {
+            foreach ((new \DOMXPath($element->ownerDocument ?? new \DOMDocument()))->query('.//text()', $element) ?: [] as $text) {
+                if ($text instanceof \DOMText) {
+                    $words[] = trim((string) preg_replace('/\s+/u', ' ', $text->textContent));
+                }
+            }
+        }
+
+        return implode(' ', array_filter($words, static fn (string $word): bool => '' !== $word));
     }
 
     private function text(Crawler $node): string

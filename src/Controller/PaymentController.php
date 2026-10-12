@@ -72,17 +72,8 @@ final readonly class PaymentController
             'overdue' => PaymentService::OVERDUE === $row['state'],
             default => PaymentService::PAID === $row['state'],
         };
-        $owed = [];
-        $overdue = [];
-        foreach ($all as $row) {
-            $currency = $row['charge']->currency;
-            if ($row['owed'] > 0) {
-                $owed[$currency] = ($owed[$currency] ?? 0) + $row['owed'];
-            }
-            if (PaymentService::OVERDUE === $row['state']) {
-                $overdue[$currency] = ($overdue[$currency] ?? 0) + $row['owed'];
-            }
-        }
+        $owed = PaymentService::owed($all);
+        $overdue = PaymentService::owed(array_values(array_filter($all, static fn (array $row): bool => $matches($row, 'overdue'))));
         $owedCount = \count(array_filter($all, static fn (array $row): bool => $matches($row, 'owed')));
         $overdueCount = \count(array_filter($all, static fn (array $row): bool => $matches($row, 'overdue')));
         $month = $this->service->paidThisMonth();

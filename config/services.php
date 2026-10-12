@@ -17,12 +17,14 @@ use Vivutio\Contracts\Access\ConcernSourceInterface;
 use Vivutio\Contracts\Partner\ChargesInterface;
 use Vivutio\Contracts\Partner\PartnerDirectoryInterface;
 use Vivutio\Contracts\Partner\PaymentSourceInterface;
+use Vivutio\Contracts\Shell\DashboardSourceInterface;
 use Vivutio\Contracts\Shell\MenuSourceInterface;
 use Vivutio\Payment\Access\PaymentConcerns;
 use Vivutio\Payment\Controller\PaymentController;
 use Vivutio\Payment\Partner\RecordedPayments;
 use Vivutio\Payment\Repository\RecordedPaymentRepository;
 use Vivutio\Payment\Service\PaymentService;
+use Vivutio\Payment\Shell\PaymentDashboard;
 use Vivutio\Payment\Shell\PaymentMenu;
 
 /*
@@ -51,6 +53,9 @@ return static function (ContainerConfigurator $container): void {
             service(PartnerDirectoryInterface::class),
             service(RecordedPaymentRepository::class),
         ]);
+    $services->set('payment.dashboard', PaymentDashboard::class)
+        ->args([service('payment.payments'), service('clock')])
+        ->tag(DashboardSourceInterface::TAG);
     $services->set('payment.recorded', RecordedPayments::class)
         ->args([service(RecordedPaymentRepository::class)])
         ->tag(PaymentSourceInterface::TAG);

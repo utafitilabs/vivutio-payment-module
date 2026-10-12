@@ -20,11 +20,19 @@ use Vivutio\Contracts\Partner\PartnerDirectoryInterface;
 /**
  * A package that charges, played for the module's suite: two tour bookings,
  * one through a partner traded with, one a party paying directly, already
- * late.
+ * late, and whatever a test charges besides.
  */
-final readonly class StandInCharges implements ChargeSourceInterface
+final class StandInCharges implements ChargeSourceInterface
 {
-    public function __construct(private PartnerDirectoryInterface $partners)
+    /**
+     * Kept across the kernel the browser boots for each request; a test that
+     * sets it empties it again.
+     *
+     * @var list<Charge>
+     */
+    public static array $besides = [];
+
+    public function __construct(private readonly PartnerDirectoryInterface $partners)
     {
     }
 
@@ -36,5 +44,6 @@ final readonly class StandInCharges implements ChargeSourceInterface
             }
         }
         yield new Charge('stand_in:ncs-4', 'NCS-0004', 'Tour booking', 'Northern Circuit Safari, 18 – 23 Oct 2026', null, 'Kweka party', 'USD', 391220, new \DateTimeImmutable('2026-10-02'), new \DateTimeImmutable('2026-10-10'));
+        yield from self::$besides;
     }
 }
